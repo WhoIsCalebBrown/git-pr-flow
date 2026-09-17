@@ -109,11 +109,13 @@ if ! git push --no-verify --set-upstream "$remote_name" "HEAD:refs/heads/$branch
   exit 1
 fi
 
-pr_url=$($gh_bin pr create --repo "$slug" --base "$default_branch" --head "$branch" --draft --fill-first 2>&1) || {
+pr_output=$($gh_bin pr create --repo "$slug" --base "$default_branch" --head "$branch" --draft --fill-first 2>&1) || {
   echo "git-pr-flow: branch was pushed, but draft PR creation failed:" >&2
-  echo "$pr_url" >&2
+  echo "$pr_output" >&2
   exit 1
 }
+pr_url=$(printf '%s\n' "$pr_output" | sed -nE 's#.*(https://github\.com/[^[:space:]]+/pull/[0-9]+).*#\1#p' | tail -n 1)
+[[ -n $pr_url ]] || pr_url=$pr_output
 
 # We are now on the preserved work branch, so returning the local default
 # pointer to the remote base cannot discard work.
