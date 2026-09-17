@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+command_name=${1:-status}
+
+repo_slug() {
+  local url owner repo
+  url=$(git remote get-url origin 2>/dev/null || true)
+  owner=$(git config --get prflow.owner 2>/dev/null || true)
+  repo=${url%.git}; repo=${repo##*/}
+  [[ -n $owner && -n $repo ]] && printf '%s/%s\n' "$owner" "$repo"
+}
+
+case "$command_name" in
+  status)
+    echo "Git PR Flow"
+    echo "  owner:       $(git config --get prflow.owner 2>/dev/null || echo not-configured)"
+    echo "  repository:  $(repo_slug || echo not-a-repository)"
+    echo "  local mode:  $(git config --local --get prflow.enabled 2>/dev/null || echo automatic)"
+    echo "  hooks path:  $(git config --get core.hooksPath 2>/dev/null || echo inactive-here)"
+    ;;
+  enable)
+    git rev-parse --git-dir >/dev/null
+    git config --local prflow.enabled true
+    echo "Git PR Flow explicitly enabled for this repository."
+    ;;
+  disable)
+    git rev-parse --git-dir >/dev/null
+    git config --local prflow.enabled false
+    echo "Git PR Flow disabled for this repository."
+    ;;
+  automatic)
+    git rev-parse --git-dir >/dev/null
+    git config --local --unset-all prflow.enabled 2>/dev/null || true
+    echo "Git PR Flow returned to owner/fork-based automatic mode."
+    ;;
+  drafts)
+    slug=$(repo_slug || true)
+    [[ -n $slug ]] || { echo "Not in a configured personal repository." >&2; exit 1; }
+    gh pr list --repo "$slug" --author @me --draft --json number,title,updatedAt,url --template '{{range .}}{{printf "#%v  %s\n%s\n" .number .title .url}}{{end}}'
+    ;;
+  *)
+    echo "usage: git pr-flow [status|enable|disable|automatic|drafts]" >&2
+    exit 2
+    ;;
+esac

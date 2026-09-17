@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Check scripts
+        run: shellcheck hooks/pre-push bin/git-pr-flow install.sh uninstall.sh tests/test-pre-push.sh
+      - name: Run integration tests
+        run: ./tests/test-pre-push.sh
