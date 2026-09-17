@@ -14,6 +14,23 @@ personal GitHub repositories, the pre-push hook:
 
 The attempted default-branch push is cancelled. No commit is lost or rewritten.
 
+### What it looks like
+
+You keep using Git normally:
+
+```text
+$ git push
+git-pr-flow: direct push to main detected; publishing 2 commit(s) as
+work/20260917-improve-audio-routing instead.
+git-pr-flow: created draft PR: https://github.com/you/project/pull/42
+git-pr-flow: you are now on work/20260917-improve-audio-routing; future pushes
+update that PR.
+```
+
+Git reports the original push as cancelled because hooks cannot replace Git's
+already-calculated destination ref. The work-branch push and draft PR shown in
+the message have succeeded.
+
 ## Safety boundary
 
 Installation uses Git's conditional configuration. The hook is active only in
