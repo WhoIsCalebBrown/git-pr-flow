@@ -48,7 +48,7 @@ if [[ -z $gh_bin ]]; then
 fi
 
 slug=$owner/$repo
-repo_info=$($gh_bin repo view "$slug" --json isFork,defaultBranchRef --jq '[.isFork, .defaultBranchRef.name] | @tsv' 2>/dev/null || true)
+repo_info=$($gh_bin repo view "$slug" --json isFork,defaultBranchRef --jq '[.isFork, .defaultBranchRef.name] | @tsv' 2>/dev/null | tail -n 1)
 if [[ -z $repo_info ]]; then
   echo "git-pr-flow: could not inspect $slug; direct default-branch push was not attempted." >&2
   exit 1
@@ -149,7 +149,7 @@ while ((SECONDS - started < merge_timeout)); do
               (.conclusion == "ACTION_REQUIRED") or
               (.conclusion == "STARTUP_FAILURE") or
               (.state == "ERROR") or
-              (.state == "FAILURE"))] | length)] | @tsv' 2>/dev/null || true)
+              (.state == "FAILURE"))] | length)] | @tsv' 2>/dev/null | tail -n 1)
 
   if [[ -z $summary ]]; then
     echo "git-pr-flow: could not read PR checks; retrying." >&2

@@ -9,6 +9,7 @@ mkdir -p "$TMP/bin"
 cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+echo 'mise configured gh' # Real installations may emit wrapper chatter on stdout.
 if [[ ${1:-} == repo && ${2:-} == view ]]; then
   printf '%s\t%s\n' "${FAKE_FORK:-false}" main
 elif [[ ${1:-} == pr && ${2:-} == create ]]; then
