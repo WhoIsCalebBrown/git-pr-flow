@@ -1,18 +1,20 @@
 # Git PR Flow
 
-Git PR Flow turns the habit of committing directly on `main` into a real pull
-request workflow at the moment you run `git push`.
+Git PR Flow turns the habit of committing directly on `main` into a complete,
+CI-gated pull request workflow at the moment you run `git push`.
 
 When a direct push targets the default branch of one of your standalone
 personal GitHub repositories, the pre-push hook:
 
 1. preserves every local commit on a `work/YYYYMMDD-description` branch;
 2. pushes that branch instead;
-3. opens a draft pull request using the first commit for its title and body;
-4. leaves you on the work branch so later pushes update the same PR; and
-5. restores your local default-branch pointer to the remote base.
+3. opens a pull request using the first commit for its title and body;
+4. waits for its CI checks and refuses to merge if any fail;
+5. squash-merges the passing PR and removes the work branch; and
+6. returns you to an up-to-date local default branch.
 
-The attempted default-branch push is cancelled. No commit is lost or rewritten.
+The attempted default-branch push is cancelled because the pull request
+replaces it. No commit is lost.
 
 ### What it looks like
 
@@ -22,14 +24,20 @@ You keep using Git normally:
 $ git push
 git-pr-flow: direct push to main detected; publishing 2 commit(s) as
 work/20260917-improve-audio-routing instead.
-git-pr-flow: created draft PR: https://github.com/you/project/pull/42
-git-pr-flow: you are now on work/20260917-improve-audio-routing; future pushes
-update that PR.
+git-pr-flow: created PR: https://github.com/you/project/pull/42
+git-pr-flow: waiting for CI before squash-merging.
+git-pr-flow: COMPLETE — CI passed and the PR was squash-merged.
+git-pr-flow: local main is current; the work branch was removed.
 ```
 
 Git reports the original push as cancelled because hooks cannot replace Git's
-already-calculated destination ref. The work-branch push and draft PR shown in
-the message have succeeded.
+already-calculated destination ref. When the hook prints `COMPLETE`, the branch
+push, PR, CI gate, squash merge, cleanup, and local synchronization succeeded.
+
+If CI fails, merge is refused and the generated branch and PR remain available
+for repair. The timeout defaults to 15 minutes. Advanced overrides are Git
+configuration keys: `prflow.mergeTimeout`, `prflow.pollInterval`, and
+`prflow.checkGrace`, all expressed in seconds.
 
 ## Safety boundary
 
@@ -70,12 +78,10 @@ git pr-flow drafts
 Use `./uninstall.sh` to remove the conditional Git configuration and installed
 hook. It does not touch repositories, commits, branches, or pull requests.
 
-## Why draft pull requests?
+## Why automatic squash merges?
 
-The push proves the commits are ready to leave the laptop, but not necessarily
-ready to merge. A draft PR gives CI and the eventual review a stable place
-without pretending the work was reviewed. Convert it to ready when the change
-is complete, then prefer a squash merge if the branch contains noisy checkpoint
-commits.
+The goal is useful project history without requiring the repository owner to
+remember ceremony. CI remains the gate: passing work becomes one clean commit
+on the default branch, while failures remain visible in an open PR for repair.
 
 MIT licensed.

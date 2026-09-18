@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Turn an attempted direct push to a personal standalone repo's default branch
-# into a feature branch and draft pull request. All other pushes pass through.
+# into a feature branch, pull request, verified squash merge, and clean local
+# handoff back to the updated default branch. All other pushes pass through.
 set -u
 
 remote_name=${1:-origin}
@@ -109,8 +110,8 @@ if ! git push --no-verify --set-upstream "$remote_name" "HEAD:refs/heads/$branch
   exit 1
 fi
 
-pr_output=$($gh_bin pr create --repo "$slug" --base "$default_branch" --head "$branch" --draft --fill-first 2>&1) || {
-  echo "git-pr-flow: branch was pushed, but draft PR creation failed:" >&2
+pr_output=$($gh_bin pr create --repo "$slug" --base "$default_branch" --head "$branch" --fill-first 2>&1) || {
+  echo "git-pr-flow: branch was pushed, but PR creation failed:" >&2
   echo "$pr_output" >&2
   exit 1
 }
@@ -122,7 +123,95 @@ pr_url=$(printf '%s\n' "$pr_output" | sed -nE 's#.*(https://github\.com/[^[:spac
 git branch --force "$default_branch" "$remote_name/$default_branch" >/dev/null
 
 echo >&2
-echo "git-pr-flow: created draft PR: $pr_url" >&2
-echo "git-pr-flow: you are now on $branch; future pushes update that PR." >&2
-echo "git-pr-flow: the original direct push was intentionally cancelled." >&2
+echo "git-pr-flow: created PR: $pr_url" >&2
+echo "git-pr-flow: waiting for CI before squash-merging." >&2
+
+merge_timeout=$(git config --get prflow.mergeTimeout 2>/dev/null || echo 900)
+poll_interval=$(git config --get prflow.pollInterval 2>/dev/null || echo 5)
+check_grace=$(git config --get prflow.checkGrace 2>/dev/null || echo 15)
+[[ $merge_timeout =~ ^[0-9]+$ ]] || merge_timeout=900
+[[ $poll_interval =~ ^[1-9][0-9]*$ ]] || poll_interval=5
+[[ $check_grace =~ ^[0-9]+$ ]] || check_grace=15
+
+started=$SECONDS
+while ((SECONDS - started < merge_timeout)); do
+  summary=$($gh_bin pr view "$pr_url" --repo "$slug" --json state,mergeable,statusCheckRollup --jq '
+    [.state,
+     .mergeable,
+     (.statusCheckRollup | length),
+     ([.statusCheckRollup[] |
+       select((.status != null and .status != "COMPLETED") or
+              (.state != null and .state != "SUCCESS" and .state != "ERROR" and .state != "FAILURE"))] | length),
+     ([.statusCheckRollup[] |
+       select((.conclusion == "FAILURE") or
+              (.conclusion == "CANCELLED") or
+              (.conclusion == "TIMED_OUT") or
+              (.conclusion == "ACTION_REQUIRED") or
+              (.conclusion == "STARTUP_FAILURE") or
+              (.state == "ERROR") or
+              (.state == "FAILURE"))] | length)] | @tsv' 2>/dev/null || true)
+
+  if [[ -z $summary ]]; then
+    echo "git-pr-flow: could not read PR checks; retrying." >&2
+    sleep "$poll_interval"
+    continue
+  fi
+
+  IFS=$'\t' read -r pr_state mergeable check_count pending_count failed_count <<<"$summary"
+  if [[ $pr_state != OPEN ]]; then
+    echo "git-pr-flow: PR is no longer open ($pr_state); leaving $branch checked out." >&2
+    exit 1
+  fi
+  if ((failed_count > 0)); then
+    echo "git-pr-flow: CI failed; leaving the PR and $branch open for repair." >&2
+    echo "git-pr-flow: $pr_url" >&2
+    exit 1
+  fi
+
+  elapsed=$((SECONDS - started))
+  checks_ready=false
+  if ((check_count > 0 && pending_count == 0 && elapsed >= check_grace)); then
+    checks_ready=true
+  elif ((check_count == 0 && elapsed >= check_grace)); then
+    echo "git-pr-flow: no CI checks appeared during the ${check_grace}s grace period." >&2
+    checks_ready=true
+  fi
+
+  if [[ $checks_ready == true && $mergeable == MERGEABLE ]]; then
+    head_oid=$(git rev-parse HEAD)
+    if ! merge_output=$($gh_bin pr merge "$pr_url" --repo "$slug" --squash --match-head-commit "$head_oid" 2>&1); then
+      echo "git-pr-flow: checks passed, but GitHub refused the squash merge:" >&2
+      echo "$merge_output" >&2
+      echo "git-pr-flow: leaving the PR and $branch open." >&2
+      exit 1
+    fi
+
+    git fetch --quiet "$remote_name" "$default_branch" || {
+      echo "git-pr-flow: PR merged, but the updated $default_branch could not be fetched." >&2
+      echo "git-pr-flow: run: git switch $default_branch && git pull --ff-only" >&2
+      exit 1
+    }
+    git branch --force "$default_branch" "$remote_name/$default_branch" >/dev/null
+    git switch "$default_branch" >/dev/null || exit 1
+    git push --no-verify "$remote_name" --delete "$branch" >/dev/null 2>&1 || true
+    git branch -D "$branch" >/dev/null 2>&1 || true
+
+    echo >&2
+    echo "git-pr-flow: COMPLETE — CI passed and the PR was squash-merged." >&2
+    echo "git-pr-flow: $pr_url" >&2
+    echo "git-pr-flow: local $default_branch is current; the work branch was removed." >&2
+    echo "git-pr-flow: the original direct push was cancelled because the PR replaced it." >&2
+    exit 1
+  fi
+
+  if ((check_count > 0)); then
+    echo "git-pr-flow: CI $((check_count - pending_count))/$check_count complete; waiting." >&2
+  else
+    echo "git-pr-flow: waiting for CI to register." >&2
+  fi
+  sleep "$poll_interval"
+done
+
+echo "git-pr-flow: timed out after ${merge_timeout}s; leaving the PR and $branch open." >&2
+echo "git-pr-flow: $pr_url" >&2
 exit 1
